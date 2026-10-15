@@ -1,0 +1,1 @@
+- [OpenAPI client codegen pitfalls](openapi-client-codegen-pitfalls.md) — check generated parameter names for collisions and include iterable DOM types when using Headers APIs.

@@ -10,6 +10,16 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: profiles
+    description: User profiles and follow relationships
+  - name: posts
+    description: Social feed posts and interactions
+  - name: messaging
+    description: Persistent direct conversations and messages
+  - name: notifications
+    description: User activity notifications
+  - name: storage
+    description: Private media upload preparation
 paths:
   /healthz:
     get:
@@ -24,6 +34,480 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /profiles/me:
+    get:
+      operationId: getMyProfile
+      tags: [profiles]
+      summary: Get the signed-in user's profile
+      responses:
+        "200":
+          description: Current profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "401":
+          description: Sign-in required
+        "404":
+          description: Profile setup is required
+    put:
+      operationId: saveMyProfile
+      tags: [profiles]
+      summary: Create or update the signed-in user's profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileInput"
+      responses:
+        "200":
+          description: Saved profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "400":
+          description: Invalid profile fields
+        "409":
+          description: Username is already taken
+  /profiles/{username}:
+    get:
+      operationId: getProfile
+      tags: [profiles]
+      summary: Get a profile by username
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Profile and relationship data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "404":
+          description: Profile not found or not visible
+  /profiles/{username}/follow:
+    put:
+      operationId: toggleFollow
+      tags: [profiles]
+      summary: Follow or unfollow a profile
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated follow relationship
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowState"
+        "400":
+          description: Self-follow or invalid request
+        "401":
+          description: Sign-in required
+        "404":
+          description: Profile not found
+  /profiles/me/follow-requests:
+    get:
+      operationId: getFollowRequests
+      tags: [profiles]
+      summary: List pending requests to follow the current user's private profile
+      responses:
+        "200":
+          description: Pending follow requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FollowRequest"
+        "401":
+          description: Sign-in required
+  /profiles/me/follow-requests/{username}:
+    put:
+      operationId: resolveFollowRequest
+      tags: [profiles]
+      summary: Accept or decline a pending follow request
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FollowRequestResolution"
+      responses:
+        "200":
+          description: Request resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowRequestResolutionResult"
+        "404":
+          description: Pending request not found
+  /feed:
+    get:
+      operationId: getFeed
+      tags: [posts]
+      summary: Get a paginated personalized feed
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [following, discover]
+            default: following
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+            default: 12
+      responses:
+        "200":
+          description: Feed page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedPage"
+        "401":
+          description: Sign-in required
+  /profiles/{username}/posts:
+    get:
+      operationId: getProfilePosts
+      tags: [profiles, posts]
+      summary: List posts visible on a profile
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Visible profile posts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Post"
+        "404":
+          description: Profile not found or posts not visible
+  /posts:
+    post:
+      operationId: createPost
+      tags: [posts]
+      summary: Publish a post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostInput"
+      responses:
+        "201":
+          description: Published post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "400":
+          description: Invalid post or media
+        "401":
+          description: Sign-in required
+  /posts/{postId}:
+    patch:
+      operationId: updatePost
+      tags: [posts]
+      summary: Edit a post caption
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostUpdate"
+      responses:
+        "200":
+          description: Updated post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "403":
+          description: Not the post owner
+        "404":
+          description: Post not found
+    delete:
+      operationId: deletePost
+      tags: [posts]
+      summary: Delete a post
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Post deleted
+        "403":
+          description: Not the post owner
+        "404":
+          description: Post not found
+  /posts/{postId}/like:
+    put:
+      operationId: toggleLike
+      tags: [posts]
+      summary: Like or unlike a post
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Updated like state and count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LikeState"
+        "404":
+          description: Post not found or not visible
+  /posts/{postId}/comments:
+    get:
+      operationId: getPostComments
+      tags: [posts]
+      summary: List comments for a post
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Comments ordered from oldest to newest
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+        "404":
+          description: Post not found or not visible
+    post:
+      operationId: createComment
+      tags: [posts]
+      summary: Comment on a post or reply to a comment
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentInput"
+      responses:
+        "201":
+          description: Created comment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+        "400":
+          description: Invalid comment
+        "404":
+          description: Post or parent comment not found
+  /search:
+    get:
+      operationId: searchSocial
+      tags: [profiles, posts]
+      summary: Search visible profiles and posts
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 80
+      responses:
+        "200":
+          description: Matching profiles and posts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResults"
+        "401":
+          description: Sign-in required
+  /conversations:
+    get:
+      operationId: getConversations
+      tags: [messaging]
+      summary: List the signed-in user's direct conversations
+      responses:
+        "200":
+          description: Conversations ordered by recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+        "401":
+          description: Sign-in required
+    post:
+      operationId: startConversation
+      tags: [messaging]
+      summary: Start or open a direct conversation by username
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationInput"
+      responses:
+        "200":
+          description: Existing or newly created conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "404":
+          description: Recipient not found or not reachable
+  /conversations/{conversationId}/messages:
+    get:
+      operationId: listMessages
+      tags: [messaging]
+      summary: Read a conversation's message history
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Messages visible to the current participant
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+        "403":
+          description: Not a conversation participant
+        "404":
+          description: Conversation not found
+    post:
+      operationId: sendMessage
+      tags: [messaging]
+      summary: Send a persistent direct message
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageInput"
+      responses:
+        "201":
+          description: Sent message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "403":
+          description: Not a conversation participant
+        "404":
+          description: Conversation not found
+  /notifications:
+    get:
+      operationId: getNotifications
+      tags: [notifications]
+      summary: List the signed-in user's recent notifications
+      responses:
+        "200":
+          description: Notifications ordered newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+        "401":
+          description: Sign-in required
+  /notifications/read-all:
+    put:
+      operationId: markAllNotificationsRead
+      tags: [notifications]
+      summary: Mark all notifications as read
+      responses:
+        "200":
+          description: Number of notifications marked as read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadCount"
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request an upload URL for a supported image
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadFileRequest"
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadFileResponse"
+        "400":
+          description: Unsupported file or upload too large
+        "401":
+          description: Sign-in required
 components:
   schemas:
     HealthStatus:
@@ -33,4 +517,197 @@ components:
           type: string
       required:
         - status
+    Profile:
+      type: object
+      required: [id, username, displayName, bio, avatarPath, isPrivate, followerCount, followingCount, postCount, followedByMe, followPending, createdAt]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        displayName: { type: string }
+        bio: { type: string }
+        avatarPath: { type: ["string", "null"] }
+        isPrivate: { type: boolean }
+        followerCount: { type: integer }
+        followingCount: { type: integer }
+        postCount: { type: integer }
+        followedByMe: { type: boolean }
+        followPending: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    ProfileInput:
+      type: object
+      required: [username, displayName, bio, isPrivate]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 24, pattern: "^[a-zA-Z0-9_.]+$" }
+        displayName: { type: string, minLength: 1, maxLength: 60 }
+        bio: { type: string, maxLength: 300 }
+        avatarPath: { type: ["string", "null"] }
+        isPrivate: { type: boolean }
+    FollowState:
+      type: object
+      required: [following, pending, followerCount]
+      properties:
+        following: { type: boolean }
+        pending: { type: boolean }
+        followerCount: { type: integer }
+    FollowRequest:
+      type: object
+      required: [id, username, displayName, avatarPath, createdAt]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        displayName: { type: string }
+        avatarPath: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+    FollowRequestResolution:
+      type: object
+      required: [accepted]
+      properties:
+        accepted: { type: boolean }
+    FollowRequestResolutionResult:
+      type: object
+      required: [resolved, accepted]
+      properties:
+        resolved: { type: boolean }
+        accepted: { type: boolean }
+    PostAuthor:
+      type: object
+      required: [id, username, displayName, avatarPath]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        displayName: { type: string }
+        avatarPath: { type: ["string", "null"] }
+    Post:
+      type: object
+      required: [id, author, caption, mediaPath, mediaType, likeCount, commentCount, likedByMe, createdAt, updatedAt]
+      properties:
+        id: { type: integer }
+        author: { $ref: "#/components/schemas/PostAuthor" }
+        caption: { type: string }
+        mediaPath: { type: ["string", "null"] }
+        mediaType: { type: ["string", "null"], enum: [image, null] }
+        likeCount: { type: integer }
+        commentCount: { type: integer }
+        likedByMe: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FeedPage:
+      type: object
+      required: [posts, nextCursor]
+      properties:
+        posts:
+          type: array
+          items: { $ref: "#/components/schemas/Post" }
+        nextCursor: { type: ["string", "null"] }
+    PostInput:
+      type: object
+      required: [caption, mediaPath]
+      properties:
+        caption: { type: string, maxLength: 2200 }
+        mediaPath: { type: ["string", "null"] }
+    PostUpdate:
+      type: object
+      required: [caption]
+      properties:
+        caption: { type: string, maxLength: 2200 }
+    LikeState:
+      type: object
+      required: [liked, likeCount]
+      properties:
+        liked: { type: boolean }
+        likeCount: { type: integer }
+    Comment:
+      type: object
+      required: [id, postId, parentCommentId, author, text, createdAt]
+      properties:
+        id: { type: integer }
+        postId: { type: integer }
+        parentCommentId: { type: ["integer", "null"] }
+        author: { $ref: "#/components/schemas/PostAuthor" }
+        text: { type: string }
+        createdAt: { type: string, format: date-time }
+    CommentInput:
+      type: object
+      required: [text, parentCommentId]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 1000 }
+        parentCommentId: { type: ["integer", "null"] }
+    SearchProfile:
+      type: object
+      required: [id, username, displayName, avatarPath]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        displayName: { type: string }
+        avatarPath: { type: ["string", "null"] }
+    SearchResults:
+      type: object
+      required: [profiles, posts]
+      properties:
+        profiles:
+          type: array
+          items: { $ref: "#/components/schemas/SearchProfile" }
+        posts:
+          type: array
+          items: { $ref: "#/components/schemas/Post" }
+    Conversation:
+      type: object
+      required: [id, otherUser, lastMessage, unreadCount, updatedAt]
+      properties:
+        id: { type: integer }
+        otherUser: { $ref: "#/components/schemas/PostAuthor" }
+        lastMessage: { type: ["string", "null"] }
+        unreadCount: { type: integer }
+        updatedAt: { type: string, format: date-time }
+    ConversationInput:
+      type: object
+      required: [username]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 24 }
+    Message:
+      type: object
+      required: [id, conversationId, sender, text, createdAt, readAt]
+      properties:
+        id: { type: integer }
+        conversationId: { type: integer }
+        sender: { $ref: "#/components/schemas/PostAuthor" }
+        text: { type: string }
+        createdAt: { type: string, format: date-time }
+        readAt: { type: ["string", "null"], format: date-time }
+    MessageInput:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 5000 }
+    Notification:
+      type: object
+      required: [id, type, actor, targetId, text, readAt, createdAt]
+      properties:
+        id: { type: integer }
+        type: { type: string, enum: [follow, like, comment, message] }
+        actor: { $ref: "#/components/schemas/PostAuthor" }
+        targetId: { type: ["integer", "null"] }
+        text: { type: string }
+        readAt: { type: ["string", "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    ReadCount:
+      type: object
+      required: [updated]
+      properties:
+        updated: { type: integer }
+    UploadFileRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        size: { type: integer, minimum: 1, maximum: 10485760 }
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp, image/gif]
+    UploadFileResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL: { type: string, format: uri }
+        objectPath: { type: string }
 
