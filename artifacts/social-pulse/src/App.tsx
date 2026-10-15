@@ -21,8 +21,24 @@ import {
 import { Link, Redirect, Route, Router as WouterRouter, Switch, useLocation } from 'wouter';
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 12_000 } },
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        const status = (error as { status?: number } | null)?.status;
+        if (status !== undefined && status >= 400 && status < 500) return false;
+        return failureCount < 1;
+      },
+      refetchOnWindowFocus: true,
+      staleTime: 12_000,
+    },
+  },
 });
+
+function errorMessage(cause: unknown, fallback: string) {
+  const data = (cause as { data?: { error?: unknown } } | null)?.data;
+  if (data && typeof data.error === 'string' && data.error.trim()) return data.error;
+  return fallback;
+}
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
 const clerkPubKey = publishableKeyFromHost(window.location.hostname, import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
@@ -138,7 +154,6 @@ function ProfileGate({ children, profileRequired }: { children: ReactNode; profi
   const noProfile = (profile.error as { status?: number } | null)?.status === 404;
   if (profile.isError && !noProfile) return <div className="page-wrap"><QueryError retry={() => profile.refetch()} /></div>;
   if (noProfile && profileRequired && !isSetup) return <Redirect to="/profile-setup" />;
-  if (profile.data && !isSetup && location === '/profile-setup') return <ProfileSetup />;
   return <AppFrame>{children}</AppFrame>;
 }
 
@@ -231,8 +246,7 @@ function HealthBadge() {
 
 function FeedPage() {
   const [scope, setScope] = useState<'following' | 'discover'>('following');
-  const [cursor, setCursor] = useState<string | undefined>();
-  const feed = useGetFeed({ scope, ...(cursor ? { cursor } : {}), limit: 20 });
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const client = useQueryClient();
   const onPostCreated = () => client.invalidateQueries({ queryKey: ['/api/feed'] });
   return <div className="page-wrap">
@@ -240,15 +254,19 @@ function FeedPage() {
     <div className="feed-layout">
       <section>
         <div className="feed-tabs" role="tablist" aria-label="Feed view">
-          <button className={`tab ${scope === 'following' ? 'active' : ''}`} onClick={() => { setScope('following'); setCursor(undefined); }} role="tab" aria-selected={scope === 'following'} data-testid="tab-following">Following</button>
-          <button className={`tab ${scope === 'discover' ? 'active' : ''}`} onClick={() => { setScope('discover'); setCursor(undefined); }} role="tab" aria-selected={scope === 'discover'} data-testid="tab-discover">Discover</button>
+          <button className={`tab ${scope === 'following' ? 'active' : ''}`} onClick={() => { setScope('following'); setCursors([undefined]); }} role="tab" aria-selected={scope === 'following'} data-testid="tab-following">Following</button>
+          <button className={`tab ${scope === 'discover' ? 'active' : ''}`} onClick={() => { setScope('discover'); setCursors([undefined]); }} role="tab" aria-selected={scope === 'discover'} data-testid="tab-discover">Discover</button>
         </div>
         <Composer onPublished={onPostCreated} />
-        {feed.isLoading && <FeedSkeleton />}
-        {feed.isError && <QueryError retry={() => feed.refetch()} />}
-        {feed.data?.posts.length === 0 && <EmptyState icon={<Users size={24} />} title={scope === 'following' ? 'Your feed is ready for people.' : 'Nothing new to discover just yet.'} message={scope === 'following' ? 'Find a few people whose moments you want to keep up with.' : 'Check back later for new posts to explore.'} action={scope === 'following' ? <Link className="button button-primary" href="/search" data-testid="link-find-people">Find people</Link> : undefined} />}
-        {feed.data?.posts.map((post) => <PostCard key={post.id} post={post} onChanged={onPostCreated} />)}
-        {feed.data?.nextCursor && <button className="button" style={{ width: '100%' }} onClick={() => setCursor(feed.data?.nextCursor || undefined)} data-testid="button-load-more">Load more</button>}
+        {cursors.map((cursor, index) => <FeedChunk
+          key={`${scope}-${cursor ?? 'start'}`}
+          scope={scope}
+          cursor={cursor}
+          isFirst={index === 0}
+          isLast={index === cursors.length - 1}
+          onLoadMore={(next) => setCursors((previous) => previous.includes(next) ? previous : [...previous, next])}
+          onChanged={onPostCreated}
+        />)}
       </section>
       <aside className="feed-aside">
         <div className="panel side-card" style={{ marginBottom: 14 }}><div className="eyebrow" style={{ marginBottom: 12 }}>A note to self</div><h3>It’s okay to keep it simple.</h3><p>A photo, a small detail, a hello to someone you miss. That’s enough to begin.</p></div>
@@ -257,6 +275,25 @@ function FeedPage() {
     </div>
   </div>;
 }
+function FeedChunk({ scope, cursor, isFirst, isLast, onLoadMore, onChanged }: {
+  scope: 'following' | 'discover';
+  cursor: string | undefined;
+  isFirst: boolean;
+  isLast: boolean;
+  onLoadMore: (next: string) => void;
+  onChanged: () => void;
+}) {
+  const feed = useGetFeed({ scope, ...(cursor ? { cursor } : {}), limit: 20 });
+  const nextCursor = feed.data?.nextCursor;
+  return <>
+    {feed.isLoading && <FeedSkeleton />}
+    {feed.isError && <QueryError retry={() => feed.refetch()} />}
+    {isFirst && feed.data?.posts.length === 0 && <EmptyState icon={<Users size={24} />} title={scope === 'following' ? 'Your feed is ready for people.' : 'Nothing new to discover just yet.'} message={scope === 'following' ? 'Find a few people whose moments you want to keep up with.' : 'Check back later for new posts to explore.'} action={scope === 'following' ? <Link className="button button-primary" href="/search" data-testid="link-find-people">Find people</Link> : undefined} />}
+    {feed.data?.posts.map((post) => <PostCard key={post.id} post={post} onChanged={onChanged} />)}
+    {isLast && nextCursor && <button className="button" style={{ width: '100%' }} onClick={() => onLoadMore(nextCursor)} data-testid="button-load-more">Load more</button>}
+  </>;
+}
+
 function FeedSkeleton() {
   return <div aria-label="Loading posts"><div className="panel" style={{ height: 430, marginBottom: 18, padding: 18 }}><div className="skeleton" style={{ height: 38, width: 170, marginBottom: 14 }} /><div className="skeleton" style={{ height: 285 }} /><div className="skeleton" style={{ height: 28, width: '65%', marginTop: 15 }} /></div></div>;
 }
@@ -302,7 +339,7 @@ function Composer({ onPublished }: { onPublished: () => void }) {
       if (fileInput.current) fileInput.current.value = '';
       onPublished();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Your post could not be published.');
+      setError(errorMessage(cause, cause instanceof Error && cause.name !== 'ApiError' ? cause.message : 'Your post could not be published.'));
     } finally { setUploading(false); }
   }
   return <form className="panel composer" onSubmit={(event) => { event.preventDefault(); void publish(); }} data-testid="form-post-composer">
@@ -541,7 +578,7 @@ function ProfileSetup() {
       const saved = await save.mutateAsync({ data: { username: username.trim(), displayName: displayName.trim(), bio: bio.trim(), isPrivate } });
       await queryClient.invalidateQueries({ queryKey: getGetMyProfileQueryKey() });
       setLocation(`/profile/${saved.username}`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'We couldn’t save your profile. Try another username.'); }
+    } catch (cause) { setError(errorMessage(cause, 'We couldn’t save your profile. Try another username.')); }
   }
   return <div className="page-wrap" style={{ maxWidth: 660 }}>
     <div className="eyebrow">A good first hello</div><h1 style={{ font: '800 clamp(36px, 6vw, 52px) var(--app-font-serif)', letterSpacing: '-.07em', margin: '8px 0 10px' }}>{profile.data ? 'Your profile' : 'Make it yours.'}</h1>
@@ -589,7 +626,7 @@ function MessagesPage() {
       const conversation = await start.mutateAsync({ data: { username: username.trim() } });
       setSelectedId(conversation.id); setUsername('');
       await client.invalidateQueries({ queryKey: getGetConversationsQueryKey() });
-    } catch (cause) { setStartError(cause instanceof Error ? cause.message : 'We couldn’t start that conversation.'); }
+    } catch (cause) { setStartError(errorMessage(cause, 'We couldn’t start that conversation.')); }
   }
   return <div className="page-wrap">
     <div className="page-heading"><div><div className="eyebrow">Keep the conversation going</div><h1>Messages.</h1></div></div>
