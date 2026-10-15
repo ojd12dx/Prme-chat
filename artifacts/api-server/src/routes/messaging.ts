@@ -318,19 +318,25 @@ router.post(
         text: "sent you a message",
       })
       .returning();
-    await Promise.all([
-      publishUserEvent(userId, "message", serialized),
-      publishUserEvent(otherId, "message", serialized),
-      notification
-        ? publishUserEvent(otherId, "notification", {
-            id: notification.id,
-            type: notification.type,
-            targetId: notification.targetId,
-            text: notification.text,
-            createdAt: notification.createdAt,
-          })
-        : Promise.resolve(),
-    ]);
+    // The message is already persisted; a failed live push (e.g. pg_notify's
+    // 8000-byte payload cap) must not turn a successful send into a 500.
+    try {
+      await Promise.all([
+        publishUserEvent(userId, "message", serialized),
+        publishUserEvent(otherId, "message", serialized),
+        notification
+          ? publishUserEvent(otherId, "notification", {
+              id: notification.id,
+              type: notification.type,
+              targetId: notification.targetId,
+              text: notification.text,
+              createdAt: notification.createdAt,
+            })
+          : Promise.resolve(),
+      ]);
+    } catch (error) {
+      req.log.warn({ err: error, conversationId: conversation.id }, "Message saved but live event delivery failed");
+    }
     res.status(201).json(serialized);
   },
 );

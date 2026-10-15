@@ -5,7 +5,10 @@ import { defineConfig } from 'vite';
 
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
-const rawPort = process.env.PORT;
+// PORT/BASE_PATH are injected by Replit for the dev/preview server. Static
+// production builds (e.g. on Vercel) never bind a port, so default them there.
+const isBuild = process.argv.includes('build');
+const rawPort = process.env.PORT ?? (isBuild ? '5173' : undefined);
 
 if (!rawPort) {
   throw new Error(
@@ -19,7 +22,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH;
+const basePath = process.env.BASE_PATH ?? (isBuild ? '/' : undefined);
 
 if (!basePath) {
   throw new Error(

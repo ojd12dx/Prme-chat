@@ -5,7 +5,10 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { mockupPreviewPlugin } from "./mockupPreviewPlugin";
 
-const rawPort = process.env.PORT;
+// PORT/BASE_PATH are injected by Replit for the dev server. Builds outside
+// Replit (e.g. the root `pnpm run build` on Vercel) never bind a port.
+const isBuild = process.argv.includes("build");
+const rawPort = process.env.PORT ?? (isBuild ? "5173" : undefined);
 
 if (!rawPort) {
   throw new Error(
@@ -19,7 +22,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH;
+const basePath = process.env.BASE_PATH ?? (isBuild ? "/__mockup/" : undefined);
 
 if (!basePath) {
   throw new Error(

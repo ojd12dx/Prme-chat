@@ -449,8 +449,12 @@ router.put("/profiles/:username/follow", async (req, res): Promise<void> => {
       .where(and(eq(followsTable.followerId, userId), eq(followsTable.followedId, target.id)));
   } else {
     const status = target.isPrivate ? "pending" : "accepted";
-    await db.insert(followsTable).values({ followerId: userId, followedId: target.id, status });
-    await createNotification(
+    const inserted = await db
+      .insert(followsTable)
+      .values({ followerId: userId, followedId: target.id, status })
+      .onConflictDoNothing()
+      .returning({ followerId: followsTable.followerId });
+    if (inserted.length > 0) await createNotification(
       target.id,
       userId,
       "follow",
@@ -678,8 +682,14 @@ router.put("/posts/:postId/like", async (req, res): Promise<void> => {
       .delete(postLikesTable)
       .where(and(eq(postLikesTable.postId, post.id), eq(postLikesTable.userId, userId)));
   } else {
-    await db.insert(postLikesTable).values({ postId: post.id, userId });
-    await createNotification(post.authorId, userId, "like", post.id, "liked your post");
+    const inserted = await db
+      .insert(postLikesTable)
+      .values({ postId: post.id, userId })
+      .onConflictDoNothing()
+      .returning({ postId: postLikesTable.postId });
+    if (inserted.length > 0) {
+      await createNotification(post.authorId, userId, "like", post.id, "liked your post");
+    }
   }
   const [likeRow] = await db
     .select({ value: count() })
